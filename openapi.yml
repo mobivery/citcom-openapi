@@ -1,0 +1,1580 @@
+openapi: 3.0.3
+info:
+  title: Citcom Peritaje APP API
+  version: 1.0.0
+  description: |
+    REST API that powers the mobile application used by citizens to request property damage inspections.
+    It covers onboarding (municipality validation and OTP login), user registration, property and damage management,
+    as well as submission and tracking of inspection requests.
+servers:
+  - url: https://api.peritaje.citcom.es/v1
+    description: Production
+  - url: https://staging.peritaje.citcom.es/v1
+    description: Staging
+  - url: http://localhost:3000/v1
+    description: Local development
+tags:
+  - name: Municipalities
+    description: Operations related to municipality validation.
+  - name: Authentication
+    description: OTP based login and session handling.
+  - name: Users
+    description: User registration and profile management.
+  - name: Properties
+    description: Management of the user's properties.
+  - name: Damages
+    description: Damage reports linked to properties.
+  - name: Requests
+    description: Submission and tracking of inspection requests.
+  - name: Media
+    description: Damage-related photos and other binary assets.
+paths:
+  /municipalities:
+    get:
+      tags: [Municipalities]
+      summary: Search eligible municipalities.
+      description: |
+        Returns the list of municipalities that are enrolled in the programme.
+        Supports text search to help the citizen confirm that their municipality is covered before onboarding.
+      operationId: listMunicipalities
+      security: []
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+            minLength: 2
+          description: Free text search across municipality name and related metadata.
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+          description: Maximum number of results to return.
+      responses:
+        '200':
+          description: Municipalities found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MunicipalitySearchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /municipalities/{municipalityId}:
+    get:
+      tags: [Municipalities]
+      summary: Retrieve a municipality.
+      description: Returns the details for a specific municipality to confirm eligibility.
+      operationId: getMunicipality
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/MunicipalityId'
+      responses:
+        '200':
+          description: Municipality found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Municipality'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /municipalities/{municipalityId}/interest:
+    post:
+      tags: [Municipalities]
+      summary: Record interest for a non-eligible municipality.
+      description: |
+        Registers anonymous interest in a municipality that is not yet part of the programme.
+        The request contains no personal data and can be made without authentication during onboarding.
+      operationId: registerMunicipalityInterest
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/MunicipalityId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MunicipalityInterestRequest'
+      responses:
+        '202':
+          description: Interest successfully recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MunicipalityInterestResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /auth/phone/otp:
+    post:
+      tags: [Authentication]
+      summary: Request an OTP.
+      description: Sends an OTP code through Firebase to the provided phone number. Respects throttling limits.
+      operationId: requestPhoneOtp
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneOtpRequest'
+      responses:
+        '202':
+          description: OTP sent.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /auth/phone/verify:
+    post:
+      tags: [Authentication]
+      summary: Verify an OTP code.
+      description: |
+        Verifies the OTP received by SMS and issues access tokens.
+        Indicates whether the user must complete registration after the login.
+      operationId: verifyPhoneOtp
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneOtpVerificationRequest'
+      responses:
+        '200':
+          description: OTP verified and tokens issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Refresh access token.
+      description: |
+        Issues a new access token using a valid refresh token.
+        The refresh token itself is not rotated and remains valid until expiration.
+      operationId: refreshToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+      responses:
+        '200':
+          description: New access token issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: The refresh token is invalid, expired, or has been revoked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Revoke the current session tokens.
+      description: Revokes access and refresh tokens. Intended for QA environments; production clients auto-refresh sessions.
+      operationId: logout
+      responses:
+        '204':
+          description: Session terminated.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /users:
+    post:
+      tags: [Users]
+      summary: Register a new user.
+      description: |
+        Completes the user onboarding after OTP verification. All profile fields must be supplied
+        and the terms and conditions must be accepted.
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRegistrationRequest'
+      responses:
+        '201':
+          description: User successfully registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Get the authenticated user's profile.
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: User profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags: [Users]
+      summary: Update the authenticated user's profile.
+      description: Allows the user to update their profile information. The tax identifier (NIF) cannot be changed.
+      operationId: updateCurrentUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdateRequest'
+      responses:
+        '200':
+          description: Updated profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Users]
+      summary: Delete the authenticated user.
+      description: |
+        Permanently deletes the account and all associated data, as exposed in the "More" section of the app.
+        The operation can be blocked while there are pending inspection requests.
+      operationId: deleteCurrentUser
+      responses:
+        '204':
+          description: Account deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: The account cannot be deleted because there are ongoing requests.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /properties:
+    get:
+      tags: [Properties]
+      summary: List the user's properties.
+      description: Returns all properties linked to the authenticated user, sorted alphabetically by name.
+      operationId: listProperties
+      responses:
+        '200':
+          description: Properties retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertyListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Properties]
+      summary: Create a new property.
+      operationId: createProperty
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PropertyCreateRequest'
+      responses:
+        '201':
+          description: Property created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Property'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /properties/{propertyId}:
+    get:
+      tags: [Properties]
+      summary: Retrieve a property.
+      operationId: getProperty
+      parameters:
+        - $ref: '#/components/parameters/PropertyId'
+      responses:
+        '200':
+          description: Property found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Property'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags: [Properties]
+      summary: Update a property.
+      description: Allows updating property details. The property cannot be updated if it has pending inspection requests.
+      operationId: updateProperty
+      parameters:
+        - $ref: '#/components/parameters/PropertyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PropertyUpdateRequest'
+      responses:
+        '200':
+          description: Property updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Property'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The property cannot be updated because there are pending requests linked to it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Properties]
+      summary: Delete a property.
+      description: |
+        Permanently deletes the property and all associated data.
+        The operation is blocked if there are inspection requests linked to this property.
+      operationId: deleteProperty
+      parameters:
+        - $ref: '#/components/parameters/PropertyId'
+      responses:
+        '204':
+          description: Property deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The property cannot be deleted because there are requests linked to it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /requests/{requestId}/damages:
+    get:
+      tags: [Damages]
+      summary: List damages for a request.
+      description: Returns the damages that belong to a draft or submitted inspection request.
+      operationId: listDamagesByRequest
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Damages retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DamageListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Damages]
+      summary: Create a new damage record.
+      description: |
+        Creates a damage associated with the inspection request. It can be edited or deleted while the request
+        remains in draft status.
+      operationId: createDamage
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DamageCreateRequest'
+      responses:
+        '201':
+          description: Damage created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Damage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /requests/{requestId}/damages/{damageId}:
+    get:
+      tags: [Damages]
+      summary: Get damage details.
+      operationId: getDamage
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/DamageId'
+      responses:
+        '200':
+          description: Damage details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Damage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags: [Damages]
+      summary: Update an existing damage.
+      description: Allowed only while the parent request has not been submitted.
+      operationId: updateDamage
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/DamageId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DamageUpdateRequest'
+      responses:
+        '200':
+          description: Damage updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Damage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Damages]
+      summary: Delete a damage.
+      description: Allowed only while the parent request remains in draft.
+      operationId: deleteDamage
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/DamageId'
+      responses:
+        '204':
+          description: Damage deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /requests/{requestId}/damages/{damageId}/photos:
+    get:
+      tags: [Media]
+      summary: List photos attached to a damage.
+      operationId: listDamagePhotos
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/DamageId'
+      responses:
+        '200':
+          description: Photos retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DamagePhotoListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Media]
+      summary: Upload a photo for a damage.
+      description: Accepts multipart uploads. Each damage can store up to five photos.
+      operationId: addDamagePhoto
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/DamageId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Photo uploaded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DamagePhoto'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          description: Uploaded file exceeds the maximum permitted size.
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /requests/{requestId}/damages/{damageId}/photos/{photoId}:
+    get:
+      tags: [Media]
+      summary: Download a specific damage photo.
+      operationId: getDamagePhoto
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/DamageId'
+        - $ref: '#/components/parameters/PhotoId'
+      responses:
+        '200':
+          description: Binary photo stream.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Media]
+      summary: Delete a damage photo.
+      description: Allowed only while the parent request is still in draft.
+      operationId: deleteDamagePhoto
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/DamageId'
+        - $ref: '#/components/parameters/PhotoId'
+      responses:
+        '204':
+          description: Photo deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /requests:
+    get:
+      tags: [Requests]
+      summary: List inspection requests.
+      description: Returns all requests created by the user, sorted from most recent to oldest.
+      operationId: listRequests
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - draft
+              - submitted
+              - received
+              - under_review
+              - info_requested
+              - rejected
+              - closed
+          description: Filter by request status.
+      responses:
+        '200':
+          description: Requests retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Requests]
+      summary: Create a new inspection request.
+      description: Creates a request in draft status linked to a property. Damages can be added afterwards while the request remains editable.
+      operationId: createRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestCreateRequest'
+      responses:
+        '201':
+          description: Request created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /requests/{requestId}:
+    get:
+      tags: [Requests]
+      summary: Get request details.
+      operationId: getRequest
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Request details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags: [Requests]
+      summary: Update a draft request.
+      description: Allows updating request notes and other details. Only permitted while the request remains in draft status.
+      operationId: updateRequest
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestUpdateRequest'
+      responses:
+        '200':
+          description: Request updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request cannot be updated because it is no longer in draft status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Requests]
+      summary: Delete a draft request.
+      description: |
+        Permanently deletes the request and all associated damages and photos.
+        Only permitted while the request remains in draft status.
+      operationId: deleteRequest
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '204':
+          description: Request deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The request cannot be deleted because it is no longer in draft status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /requests/{requestId}/submit:
+    post:
+      tags: [Requests]
+      summary: Submit a request for review.
+      description: Changes the request status from draft to submitted. No further edits are allowed afterwards.
+      operationId: submitRequest
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '202':
+          description: Request submitted for review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    MunicipalityId:
+      name: municipalityId
+      in: path
+      required: true
+      description: Municipality identifier.
+      schema:
+        type: string
+        format: uuid
+    PropertyId:
+      name: propertyId
+      in: path
+      required: true
+      description: Property identifier.
+      schema:
+        type: string
+        format: uuid
+    DamageId:
+      name: damageId
+      in: path
+      required: true
+      description: Damage identifier.
+      schema:
+        type: string
+        format: uuid
+    PhotoId:
+      name: photoId
+      in: path
+      required: true
+      description: Photo identifier.
+      schema:
+        type: string
+        format: uuid
+    RequestId:
+      name: requestId
+      in: path
+      required: true
+      description: Request identifier.
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: The request payload is invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: The request requires authentication or the token expired.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: The referenced resource was not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: The operation conflicts with the current state of the resource.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TooManyRequests:
+      description: Throttling limits were exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: Unexpected error while processing the request.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      description: RFC 7807 Problem Details for HTTP APIs.
+      properties:
+        type:
+          type: string
+          format: uri
+          default: about:blank
+          description: A URI reference that identifies the problem type.
+          example: https://api.peritaje.citcom.es/problems/validation-error
+        title:
+          type: string
+          description: A short, human-readable summary of the problem type.
+          example: Validation Error
+        status:
+          type: integer
+          description: The HTTP status code generated by the origin server.
+          example: 400
+        detail:
+          type: string
+          description: A human-readable explanation specific to this occurrence of the problem.
+          example: The phone number does not match the required format.
+        instance:
+          type: string
+          format: uri
+          description: A URI reference that identifies the specific occurrence of the problem.
+          example: /requests/550e8400-e29b-41d4-a716-446655440000
+        traceId:
+          type: string
+          format: uuid
+          description: Internal trace identifier for debugging purposes.
+      required:
+        - type
+        - title
+        - status
+      additionalProperties: true
+    Municipality:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        province:
+          type: string
+        isEligible:
+          type: boolean
+          description: Indicates whether the city council is participating in the programme.
+        createdAt:
+          type: string
+          format: date-time
+        lastUpdatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - province
+        - isEligible
+        - createdAt
+        - lastUpdatedAt
+    MunicipalitySearchResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+          minimum: 0
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Municipality'
+      required:
+        - total
+        - results
+    MunicipalityInterestRequest:
+      type: object
+      properties:
+        municipalityId:
+          type: string
+          format: uuid
+          description: Identifier of the municipality for which interest is expressed.
+      required:
+        - municipalityId
+    MunicipalityInterestResponse:
+      type: object
+      properties:
+        municipalityId:
+          type: string
+          format: uuid
+        recordedAt:
+          type: string
+          format: date-time
+        message:
+          type: string
+          example: Thank you for your interest. We will notify you once this municipality becomes available.
+      required:
+        - municipalityId
+        - recordedAt
+        - message
+    PhoneOtpRequest:
+      type: object
+      properties:
+        phoneNumber:
+          type: string
+          pattern: '^\+34[0-9]{9}$'
+          example: '+34612345678'
+      required:
+        - phoneNumber
+      example:
+        phoneNumber: '+34612345678'
+    PhoneOtpVerificationRequest:
+      type: object
+      properties:
+        phoneNumber:
+          type: string
+          pattern: '^\+34[0-9]{9}$'
+        verificationCode:
+          type: string
+          pattern: '^[0-9]{6}$'
+        deviceFingerprint:
+          type: string
+          maxLength: 200
+          description: Optional device identifier used to strengthen security.
+      required:
+        - phoneNumber
+        - verificationCode
+    TokenRefreshRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+          description: The refresh token obtained during login or previous refresh.
+      required:
+        - refreshToken
+    AuthTokenResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        tokenType:
+          type: string
+          example: Bearer
+        expiresIn:
+          type: integer
+          description: Number of seconds until the access token expires.
+        isNewUser:
+          type: boolean
+          description: Indicates whether the user must complete the registration form.
+        userId:
+          type: string
+          format: uuid
+      required:
+        - accessToken
+        - refreshToken
+        - tokenType
+        - expiresIn
+        - isNewUser
+        - userId
+    UserRegistrationRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          example: 'juan.perez@example.com'
+        firstName:
+          type: string
+          maxLength: 100
+          example: 'Juan'
+        lastName:
+          type: string
+          maxLength: 100
+          example: 'Pérez García'
+        nif:
+          type: string
+          pattern: '^[0-9XYZ][0-9]{7}[A-Z]$'
+          example: '12345678Z'
+        address:
+          type: string
+          maxLength: 255
+          example: 'Calle Mayor 123, 3º B'
+        municipality:
+          type: string
+          maxLength: 100
+          example: 'Madrid'
+        postalCode:
+          type: string
+          pattern: '^[0-9]{5}$'
+          example: '28013'
+        province:
+          type: string
+          maxLength: 100
+          example: 'Madrid'
+        termsAcceptedAt:
+          type: string
+          format: date-time
+          description: Timestamp when the user accepted the terms and conditions.
+          example: '2025-01-15T10:30:00Z'
+      required:
+        - email
+        - firstName
+        - lastName
+        - nif
+        - address
+        - municipality
+        - postalCode
+        - province
+        - termsAcceptedAt
+      example:
+        email: 'juan.perez@example.com'
+        firstName: 'Juan'
+        lastName: 'Pérez García'
+        nif: '12345678Z'
+        address: 'Calle Mayor 123, 3º B'
+        municipality: 'Madrid'
+        postalCode: '28013'
+        province: 'Madrid'
+        termsAcceptedAt: '2025-01-15T10:30:00Z'
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        phoneNumber:
+          type: string
+          pattern: '^\+34[0-9]{9}$'
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+        lastName:
+          type: string
+        nif:
+          type: string
+        address:
+          type: string
+        municipality:
+          type: string
+        postalCode:
+          type: string
+        province:
+          type: string
+        termsAcceptedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - phoneNumber
+        - email
+        - firstName
+        - lastName
+        - nif
+        - address
+        - municipality
+        - postalCode
+        - province
+        - termsAcceptedAt
+        - createdAt
+        - updatedAt
+    UserUpdateRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+          maxLength: 100
+        lastName:
+          type: string
+          maxLength: 100
+        address:
+          type: string
+          maxLength: 255
+        municipality:
+          type: string
+          maxLength: 100
+        postalCode:
+          type: string
+          pattern: '^[0-9]{5}$'
+        province:
+          type: string
+          maxLength: 100
+      additionalProperties: false
+    PropertyType:
+      type: string
+      enum:
+        - house
+        - terraced_house
+        - apartment
+    Property:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/PropertyType'
+        address:
+          type: string
+        municipality:
+          type: string
+        postalCode:
+          type: string
+        province:
+          type: string
+        isOwner:
+          type: boolean
+          description: Indicates whether the authenticated user is the legal owner of the property.
+        cadastralReference:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - type
+        - address
+        - municipality
+        - postalCode
+        - province
+        - isOwner
+        - cadastralReference
+        - createdAt
+        - updatedAt
+    PropertyCreateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 120
+          example: 'Vivienda Principal'
+        type:
+          $ref: '#/components/schemas/PropertyType'
+        address:
+          type: string
+          maxLength: 255
+          example: 'Calle del Arenal 45, 2º A'
+        municipality:
+          type: string
+          maxLength: 100
+          example: 'Valencia'
+        postalCode:
+          type: string
+          pattern: '^[0-9]{5}$'
+          example: '46001'
+        province:
+          type: string
+          maxLength: 100
+          example: 'Valencia'
+        isOwner:
+          type: boolean
+          description: Whether the authenticated user owns the property.
+          example: true
+        cadastralReference:
+          type: string
+          maxLength: 50
+          example: '1234567VH1234N0001AB'
+      required:
+        - name
+        - type
+        - address
+        - municipality
+        - postalCode
+        - province
+        - isOwner
+        - cadastralReference
+      example:
+        name: 'Vivienda Principal'
+        type: 'apartment'
+        address: 'Calle del Arenal 45, 2º A'
+        municipality: 'Valencia'
+        postalCode: '46001'
+        province: 'Valencia'
+        isOwner: true
+        cadastralReference: '1234567VH1234N0001AB'
+    PropertyUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        type:
+          $ref: '#/components/schemas/PropertyType'
+        address:
+          type: string
+          maxLength: 255
+        municipality:
+          type: string
+          maxLength: 100
+        postalCode:
+          type: string
+          pattern: '^[0-9]{5}$'
+        province:
+          type: string
+          maxLength: 100
+        isOwner:
+          type: boolean
+        cadastralReference:
+          type: string
+          maxLength: 50
+      additionalProperties: false
+    PropertyListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Property'
+      required:
+        - total
+        - items
+    DamageScope:
+      type: string
+      enum:
+        - common_elements
+        - private_elements
+    DamageCategory:
+      type: string
+      enum:
+        - fence
+        - pavement
+        - outdoor_lighting
+        - external_drainage_network
+        - gardening
+        - irrigation
+        - outdoor_furniture
+        - partitions
+        - indoor_carpentry
+        - wall_finishing
+        - flooring
+        - ceilings
+        - electrical_installations
+        - lighting_and_telecommunications
+        - plumbing_and_sanitaryware
+        - indoor_drainage_network
+    DamagePhoto:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        url:
+          type: string
+          format: uri
+        uploadedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - url
+        - uploadedAt
+    Damage:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        scope:
+          $ref: '#/components/schemas/DamageScope'
+        name:
+          type: string
+          maxLength: 150
+        category:
+          $ref: '#/components/schemas/DamageCategory'
+        description:
+          type: string
+          maxLength: 2000
+        photos:
+          type: array
+          items:
+            $ref: '#/components/schemas/DamagePhoto'
+          maxItems: 5
+        isEditable:
+          type: boolean
+          description: Indicates whether the damage can still be edited.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - scope
+        - name
+        - category
+        - description
+        - photos
+        - isEditable
+        - createdAt
+        - updatedAt
+    DamageCreateRequest:
+      type: object
+      properties:
+        scope:
+          $ref: '#/components/schemas/DamageScope'
+        name:
+          type: string
+          maxLength: 150
+          example: 'Grietas en pared exterior'
+        category:
+          $ref: '#/components/schemas/DamageCategory'
+        description:
+          type: string
+          maxLength: 2000
+          example: 'Se observan grietas verticales en la pared exterior de la fachada norte, con una longitud aproximada de 2 metros. Las grietas tienen un ancho de aproximadamente 5mm.'
+      required:
+        - scope
+        - name
+        - category
+        - description
+      example:
+        scope: 'common_elements'
+        name: 'Grietas en pared exterior'
+        category: 'wall_finishing'
+        description: 'Se observan grietas verticales en la pared exterior de la fachada norte, con una longitud aproximada de 2 metros. Las grietas tienen un ancho de aproximadamente 5mm.'
+    DamageUpdateRequest:
+      type: object
+      properties:
+        scope:
+          $ref: '#/components/schemas/DamageScope'
+        name:
+          type: string
+          maxLength: 150
+        category:
+          $ref: '#/components/schemas/DamageCategory'
+        description:
+          type: string
+          maxLength: 2000
+      additionalProperties: false
+    DamageListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Damage'
+      required:
+        - total
+        - items
+    DamagePhotoListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DamagePhoto'
+      required:
+        - total
+        - items
+    RequestStatus:
+      type: string
+      enum:
+        - draft
+        - submitted
+        - received
+        - under_review
+        - info_requested
+        - rejected
+        - closed
+    RequestCreateRequest:
+      type: object
+      properties:
+        propertyId:
+          type: string
+          format: uuid
+          example: '550e8400-e29b-41d4-a716-446655440000'
+        notes:
+          type: string
+          maxLength: 1000
+          example: 'Los daños se produjeron durante las lluvias torrenciales del pasado mes de octubre. Se requiere inspección urgente.'
+      required:
+        - propertyId
+      example:
+        propertyId: '550e8400-e29b-41d4-a716-446655440000'
+        notes: 'Los daños se produjeron durante las lluvias torrenciales del pasado mes de octubre. Se requiere inspección urgente.'
+    RequestUpdateRequest:
+      type: object
+      properties:
+        notes:
+          type: string
+          maxLength: 1000
+      additionalProperties: false
+    RequestSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        property:
+          $ref: '#/components/schemas/Property'
+        status:
+          $ref: '#/components/schemas/RequestStatus'
+        totalDamages:
+          type: integer
+          minimum: 0
+      required:
+        - id
+        - createdAt
+        - property
+        - status
+        - totalDamages
+    RequestDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          description: Timestamp of the last modification to the request.
+        submittedAt:
+          type: string
+          format: date-time
+          description: Timestamp when the request was submitted for review. Only present when status is not draft.
+        status:
+          $ref: '#/components/schemas/RequestStatus'
+        property:
+          $ref: '#/components/schemas/Property'
+        damages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Damage'
+        notes:
+          type: string
+          description: Optional notes provided by the user about the request.
+        lastStatusUpdatedAt:
+          type: string
+          format: date-time
+          description: Timestamp of the last status change.
+      required:
+        - id
+        - createdAt
+        - updatedAt
+        - status
+        - property
+        - damages
+    RequestListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RequestSummary'
+      required:
+        - total
+        - items

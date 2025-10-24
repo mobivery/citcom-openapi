@@ -1,0 +1,1298 @@
+openapi: 3.0.3
+info:
+  title: Citcom Peritaje CMS API
+  version: 1.0.0
+  description: |
+    REST API that powers the Citcom content management system. It provides endpoints for
+    administrative authentication, operator onboarding, and the review workflow of inspection requests.
+servers:
+  - url: https://api.peritaje.citcom.es/v1
+    description: Production
+  - url: https://staging.peritaje.citcom.es/v1
+    description: Staging
+  - url: http://localhost:3000/v1
+    description: Local development
+tags:
+  - name: Municipalities
+    description: Operations related to municipality management.
+  - name: Authentication
+    description: Authentication and session endpoints for CMS operators.
+  - name: Users
+    description: Administrative management of CMS operator accounts.
+  - name: Requests
+    description: Triage and follow-up of inspection requests.
+  - name: Documents
+    description: Generated documents and binary artefacts for the CMS.
+security:
+  - bearerAuth: []
+paths:
+  /cms/municipalities:
+    get:
+      tags: [Municipalities]
+      summary: List municipalities.
+      description: |
+        Returns the list of municipalities enrolled in the programme.
+        Supports text search and filtering.
+      operationId: listCmsMunicipalities
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+            minLength: 2
+          description: Free text search across municipality name and related metadata.
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+          description: Maximum number of results to return.
+      responses:
+        '200':
+          description: Municipalities found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MunicipalityListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cms/auth/email/magic-links:
+    post:
+      tags: [Authentication]
+      summary: Request a sign-in magic link.
+      description: |
+        Triggers the delivery of a Firebase email link that allows an operator to access the CMS.
+        Always returns an accepted response to avoid leaking the existence of accounts.
+      operationId: requestCmsMagicLink
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MagicLinkRequest'
+      responses:
+        '202':
+          description: Magic link dispatched if the email is registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MagicLinkAcceptedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cms/auth/email/sessions:
+    post:
+      tags: [Authentication]
+      summary: Exchange a magic link token for CMS session tokens.
+      description: |
+        Validates the token issued through the Firebase email link and issues CMS access tokens.
+        Sessions last up to one month unless revoked.
+      operationId: createCmsSession
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MagicLinkSessionRequest'
+      responses:
+        '200':
+          description: Session successfully established.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CmsAuthTokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cms/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Refresh CMS access token.
+      description: |
+        Issues a new access token using a valid refresh token.
+        The refresh token itself is not rotated and remains valid until expiration.
+      operationId: refreshCmsToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+      responses:
+        '200':
+          description: New access token issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CmsAuthTokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: The refresh token is invalid, expired, or has been revoked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cms/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Revoke the current CMS session tokens.
+      description: Revokes access and refresh tokens, terminating the current session.
+      operationId: logoutCms
+      responses:
+        '204':
+          description: Session terminated.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cms/users:
+    get:
+      tags: [Users]
+      summary: List CMS users.
+      description: |
+        Returns the operator directory with pagination, filtering, and sorting.
+        Superadmins can see all records; municipality admins are restricted to their municipality.
+      operationId: listCmsUsers
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Sort'
+        - name: role
+          in: query
+          schema:
+            $ref: '#/components/schemas/CmsUserRole'
+          description: Filter by operator role.
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/CmsUserStatus'
+          description: Filter by account lifecycle status.
+        - name: municipalityId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter users belonging to a specific municipality.
+        - name: unit
+          in: query
+          schema:
+            type: string
+          description: Filter by unit or service name.
+        - name: email
+          in: query
+          schema:
+            type: string
+            format: email
+          description: Filter by email address (exact match).
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Free text search across name and email.
+      responses:
+        '200':
+          description: Users retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CmsUserListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Users]
+      summary: Invite a new CMS user.
+      description: |
+        Sends an invitation email to onboard a new operator. Email uniqueness is enforced across the CMS.
+      operationId: inviteCmsUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CmsUserCreateRequest'
+      responses:
+        '201':
+          description: User invited successfully.
+          headers:
+            Location:
+              description: URL of the created user resource.
+              schema:
+                type: string
+                format: uri
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CmsUserDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cms/users/{userId}:
+    get:
+      tags: [Users]
+      summary: Retrieve a CMS user.
+      operationId: getCmsUser
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: User profile retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CmsUserDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Users]
+      summary: Delete a CMS user.
+      description: |
+        Removes an operator from the CMS. A confirmation step must occur in the client prior to invoking this endpoint.
+      operationId: deleteCmsUser
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '204':
+          description: User deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cms/users/{userId}/resend-invitation:
+    post:
+      tags: [Users]
+      summary: Resend a pending invitation.
+      description: Re-sends the onboarding link to an operator that has not accessed the CMS yet.
+      operationId: resendCmsUserInvitation
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResendInvitationRequest'
+      responses:
+        '202':
+          description: Invitation re-sent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationDispatchResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cms/users/me:
+    get:
+      tags: [Users]
+      summary: Retrieve the authenticated CMS profile.
+      operationId: getCmsSelfProfile
+      responses:
+        '200':
+          description: Authenticated operator profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CmsMyProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cms/requests:
+    get:
+      tags: [Requests]
+      summary: List inspection requests for the CMS.
+      description: |
+        Provides a paginated view of inspection requests. Results honour the caller scope and applied filters.
+      operationId: listCmsRequests
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Sort'
+        - name: status
+          in: query
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/RequestStatus'
+          description: Filter by one or more workflow statuses.
+          style: form
+          explode: false
+        - name: priority
+          in: query
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/CmsRequestPriority'
+          description: Filter by one or more technician assigned priorities.
+          style: form
+          explode: false
+        - name: municipalityId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter requests by municipality identifier.
+        - name: propertyType
+          in: query
+          schema:
+            $ref: '#/components/schemas/PropertyType'
+          description: Filter by property type.
+        - name: cadastralReference
+          in: query
+          schema:
+            type: string
+          description: Filter by cadastral reference.
+        - name: address
+          in: query
+          schema:
+            type: string
+          description: Filter by address text.
+        - name: applicant
+          in: query
+          schema:
+            type: string
+          description: Filter by applicant name or email text.
+        - name: fromDate
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Only include requests created on or after this date.
+        - name: toDate
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Only include requests created on or before this date.
+      responses:
+        '200':
+          description: Requests retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CmsRequestListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cms/requests/{requestId}:
+    get:
+      tags: [Requests]
+      summary: Retrieve an inspection request in detail.
+      operationId: getCmsRequest
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Request detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CmsRequestDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags: [Requests]
+      summary: Update the state or priority of a request.
+      description: |
+        Allows technicians to adjust the workflow status and intervention priority after reviewing the case.
+      operationId: updateCmsRequest
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CmsRequestUpdateRequest'
+      responses:
+        '200':
+          description: Request updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CmsRequestDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cms/requests/{requestId}/damages/{damageId}/media:
+    get:
+      tags: [Requests]
+      summary: List media linked to a damage entry.
+      description: Provides the gallery of images submitted for a specific damage.
+      operationId: listCmsDamageMedia
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/DamageId'
+      responses:
+        '200':
+          description: Media assets retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CmsMediaListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cms/requests/{requestId}/documents/ai-report:
+    get:
+      tags: [Documents]
+      summary: Download the AI-generated diagnostic report.
+      description: Returns the PDF generated by the AI service for the given request.
+      operationId: downloadCmsAiReport
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: AI report delivered.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /cms/requests/{requestId}/documents/intervention-report:
+    get:
+      tags: [Documents]
+      summary: Download the intervention report document.
+      description: |
+        Returns a PDF that summarises property data, reported damages, and the assigned priority for the intervention.
+      operationId: downloadCmsInterventionReport
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Intervention report delivered.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Page:
+      name: page
+      in: query
+      description: Page number starting from 1.
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      description: Number of items to return per page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 25
+    Sort:
+      name: sort
+      in: query
+      description: |
+        Sort criteria, e.g. `lastAccessAt` or `-submittedAt`. Prefix with `-` for descending order.
+      schema:
+        type: string
+    UserId:
+      name: userId
+      in: path
+      required: true
+      description: CMS user identifier.
+      schema:
+        type: string
+        format: uuid
+    RequestId:
+      name: requestId
+      in: path
+      required: true
+      description: Inspection request identifier.
+      schema:
+        type: string
+        format: uuid
+    DamageId:
+      name: damageId
+      in: path
+      required: true
+      description: Damage identifier.
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: The request payload is invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Authentication is required or the provided token is invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: The caller does not have permission to perform this action.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: The referenced resource was not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: The operation conflicts with the current state of the resource.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TooManyRequests:
+      description: The request was throttled because too many attempts were made in a short period.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: Unexpected error while processing the request.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        traceId:
+          type: string
+          format: uuid
+      required:
+        - type
+        - title
+        - status
+    MagicLinkRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        redirectUrl:
+          type: string
+          format: uri
+          description: Optional deep link to redirect to after the session is created.
+      required:
+        - email
+    MagicLinkAcceptedResponse:
+      type: object
+      properties:
+        deliveryId:
+          type: string
+          description: Identifier of the delivery operation for traceability.
+        expiresAt:
+          type: string
+          format: date-time
+          description: Expiration time for the magic link.
+      required:
+        - deliveryId
+        - expiresAt
+    MagicLinkSessionRequest:
+      type: object
+      properties:
+        token:
+          type: string
+          description: Token obtained from the Firebase magic link.
+        deviceFingerprint:
+          type: string
+          maxLength: 200
+          description: Optional device identifier to bind the session.
+      required:
+        - token
+    TokenRefreshRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+          description: The refresh token obtained during login or previous refresh.
+      required:
+        - refreshToken
+    CmsAuthTokenResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        tokenType:
+          type: string
+          example: Bearer
+        expiresIn:
+          type: integer
+          description: Number of seconds until the access token expires.
+        refreshExpiresIn:
+          type: integer
+          description: Number of seconds until the refresh token expires.
+        user:
+          $ref: '#/components/schemas/CmsAuthenticatedUser'
+      required:
+        - accessToken
+        - refreshToken
+        - tokenType
+        - expiresIn
+        - user
+    CmsAuthenticatedUser:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+        lastName:
+          type: string
+        role:
+          $ref: '#/components/schemas/CmsUserRole'
+        municipality:
+          allOf:
+            - $ref: '#/components/schemas/CmsScope'
+          nullable: true
+          description: Municipality scope the user can manage. Null for superadmins who manage all municipalities.
+      required:
+        - id
+        - email
+        - firstName
+        - lastName
+        - role
+    CmsUserRole:
+      type: string
+      enum:
+        - superadmin
+        - municipality_admin
+        - technician
+    CmsUserStatus:
+      type: string
+      enum:
+        - invited
+        - active
+        - suspended
+        - deleted
+    CmsScope:
+      type: object
+      description: Represents a municipality scope in the CMS.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+      required:
+        - id
+        - name
+    CmsUserSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/CmsUserRole'
+        municipality:
+          allOf:
+            - $ref: '#/components/schemas/CmsScope'
+          nullable: true
+          description: Municipality scope the user is associated with. Null for superadmins.
+        unit:
+          type: string
+          description: Informational unit or service the operator belongs to.
+        status:
+          $ref: '#/components/schemas/CmsUserStatus'
+        lastAccessAt:
+          type: string
+          format: date-time
+          nullable: true
+        invitationSentAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - firstName
+        - lastName
+        - email
+        - role
+        - status
+        - invitationSentAt
+    CmsUserDetail:
+      allOf:
+        - $ref: '#/components/schemas/CmsUserSummary'
+        - type: object
+          properties:
+            createdAt:
+              type: string
+              format: date-time
+            phoneNumber:
+              type: string
+              nullable: true
+          required:
+            - createdAt
+    CmsUserCreateRequest:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
+        unit:
+          type: string
+          description: Informational unit or service name shown in the CMS.
+        municipalityId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Municipality identifier the operator will manage. Null for superadmins.
+        role:
+          $ref: '#/components/schemas/CmsUserRole'
+      required:
+        - firstName
+        - lastName
+        - email
+        - role
+    ResendInvitationRequest:
+      type: object
+      properties:
+        comment:
+          type: string
+          maxLength: 250
+          description: Optional note explaining why the invitation is being resent.
+    InvitationDispatchResponse:
+      type: object
+      properties:
+        sentAt:
+          type: string
+          format: date-time
+        deliveryId:
+          type: string
+      required:
+        - sentAt
+        - deliveryId
+    CmsMyProfile:
+      allOf:
+        - $ref: '#/components/schemas/CmsUserDetail'
+        - type: object
+          properties:
+            emailVerified:
+              type: boolean
+          required:
+            - emailVerified
+    CmsUserListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of users matching the query.
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CmsUserSummary'
+      required:
+        - total
+        - items
+    Municipality:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        province:
+          type: string
+        isEligible:
+          type: boolean
+          description: Indicates whether the city council is participating in the programme.
+        createdAt:
+          type: string
+          format: date-time
+        lastUpdatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - province
+        - isEligible
+        - createdAt
+        - lastUpdatedAt
+    MunicipalityListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of municipalities matching the query.
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Municipality'
+      required:
+        - total
+        - items
+    PropertyType:
+      type: string
+      enum:
+        - house
+        - terraced_house
+        - apartment
+    RequestStatus:
+      type: string
+      enum:
+        - draft
+        - submitted
+        - received
+        - under_review
+        - info_requested
+        - rejected
+        - closed
+    CmsRequestPriority:
+      type: string
+      enum:
+        - urgent
+        - high
+        - medium
+        - low
+    CmsRequestListItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/RequestStatus'
+        lastStatusUpdatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the status was last updated. Null if status has never been changed.
+        priority:
+          allOf:
+            - $ref: '#/components/schemas/CmsRequestPriority'
+          nullable: true
+          description: Priority assigned by a technician. Null until explicitly set.
+        propertyType:
+          $ref: '#/components/schemas/PropertyType'
+        address:
+          type: string
+        municipalityName:
+          type: string
+        applicantName:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the request was submitted. Null if still in draft state.
+        lastUpdatedAt:
+          type: string
+          format: date-time
+        municipality:
+          allOf:
+            - $ref: '#/components/schemas/CmsScope'
+          description: Municipality where the request was submitted.
+      required:
+        - id
+        - status
+        - propertyType
+        - address
+        - municipalityName
+        - applicantName
+        - lastUpdatedAt
+        - municipality
+    CmsRequestListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of requests matching the query.
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CmsRequestListItem'
+      required:
+        - total
+        - items
+    CmsRequestDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/RequestStatus'
+        lastStatusUpdatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the status was last updated. Null if status has never been changed.
+        priority:
+          allOf:
+            - $ref: '#/components/schemas/CmsRequestPriority'
+          nullable: true
+          description: Priority assigned by a technician. Null until explicitly set.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          description: Timestamp of the last modification to the request.
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the request was submitted. Null if still in draft state.
+        property:
+          $ref: '#/components/schemas/Property'
+        applicant:
+          $ref: '#/components/schemas/CmsRequestApplicant'
+          description: The person who created and submitted the request.
+        damages:
+          type: array
+          items:
+            $ref: '#/components/schemas/CmsRequestDamage'
+        notes:
+          type: string
+          nullable: true
+        aiReportStatus:
+          $ref: '#/components/schemas/AiReportStatus'
+          description: Current status of the AI-generated diagnostic report.
+      required:
+        - id
+        - status
+        - createdAt
+        - updatedAt
+        - property
+        - applicant
+        - damages
+        - aiReportStatus
+    CmsUserReference:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        firstName:
+          type: string
+        lastName:
+          type: string
+        role:
+          $ref: '#/components/schemas/CmsUserRole'
+      required:
+        - id
+        - firstName
+        - lastName
+        - role
+    Property:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/PropertyType'
+        address:
+          type: string
+        municipality:
+          type: string
+        postalCode:
+          type: string
+        province:
+          type: string
+        isOwner:
+          type: boolean
+          description: Indicates whether the authenticated user is the legal owner of the property.
+        cadastralReference:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - type
+        - address
+        - municipality
+        - postalCode
+        - province
+        - isOwner
+        - cadastralReference
+        - createdAt
+        - updatedAt
+    CmsRequestApplicant:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
+        phoneNumber:
+          type: string
+          nullable: true
+        role:
+          type: string
+          description: Relationship of the applicant with the property (e.g. owner, tenant).
+      required:
+        - id
+        - firstName
+        - lastName
+        - email
+        - role
+    CmsRequestDamage:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        scope:
+          $ref: '#/components/schemas/DamageScope'
+        name:
+          type: string
+        category:
+          $ref: '#/components/schemas/DamageCategory'
+        description:
+          type: string
+        typology:
+          type: string
+          description: Additional classification used in internal reports.
+        photos:
+          type: array
+          items:
+            $ref: '#/components/schemas/CmsMediaAsset'
+      required:
+        - id
+        - scope
+        - name
+        - category
+        - description
+        - photos
+    DamageScope:
+      type: string
+      enum:
+        - common_elements
+        - private_elements
+    DamageCategory:
+      type: string
+      enum:
+        - fence
+        - pavement
+        - outdoor_lighting
+        - external_drainage_network
+        - gardening
+        - irrigation
+        - outdoor_furniture
+        - partitions
+        - indoor_carpentry
+        - wall_finishing
+        - flooring
+        - ceilings
+        - electrical_installations
+        - lighting_and_telecommunications
+        - plumbing_and_sanitaryware
+        - indoor_drainage_network
+    AiReportStatus:
+      type: string
+      enum:
+        - pending
+        - processing
+        - completed
+        - failed
+      description: |
+        Status of the AI-generated diagnostic report:
+        - pending: The report has not been requested or generated yet
+        - processing: The report is being generated by the AI service
+        - completed: The report has been generated and is available for download
+        - failed: The report generation failed
+    CmsMediaAsset:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        url:
+          type: string
+          format: uri
+        uploadedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - url
+        - uploadedAt
+    CmsMediaListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CmsMediaAsset'
+      required:
+        - total
+        - items
+    CmsRequestUpdateRequest:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/RequestStatus'
+        priority:
+          $ref: '#/components/schemas/CmsRequestPriority'
+      additionalProperties: false
+    CmsDocumentSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          description: Document type identifier (e.g. ai_report, priority_report).
+        title:
+          type: string
+        downloadUrl:
+          type: string
+          format: uri
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - id
+        - type
+        - title
+        - downloadUrl

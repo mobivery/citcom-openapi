@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Citcom Peritaje API Documentation</title>
+    <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            margin: 0 0 0.5rem 0;
+            font-size: 2rem;
+        }
+
+        .header p {
+            margin: 0;
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .api-selector {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .api-selector button {
+            padding: 0.75rem 1.5rem;
+            border: 2px solid #667eea;
+            background: white;
+            color: #667eea;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .api-selector button:hover {
+            background: #667eea;
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        .api-selector button.active {
+            background: #667eea;
+            color: white;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        #swagger-ui {
+            max-width: 1460px;
+            margin: 0 auto;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 2rem;
+            color: #6c757d;
+            border-top: 1px solid #e9ecef;
+            margin-top: 3rem;
+        }
+
+        .swagger-ui .topbar {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Citcom Peritaje API Documentation</h1>
+        <p>Documentación completa de las APIs del sistema de peritaje</p>
+    </div>
+
+    <div class="api-selector">
+        <button onclick="loadAPI('openapi.yml')" id="btn-app" class="active">
+            App API
+        </button>
+        <button onclick="loadAPI('openapi-cms.yml')" id="btn-cms">
+            CMS API
+        </button>
+        <button onclick="loadAPI('openapi-ai-docs.yml')" id="btn-ai">
+            AI Service API
+        </button>
+    </div>
+
+    <div id="swagger-ui"></div>
+
+    <div class="footer">
+        <p>© 2025 Citcom Peritaje - Powered by Swagger UI</p>
+    </div>
+
+    <script src="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui-bundle.js"></script>
+    <script src="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui-standalone-preset.js"></script>
+    <script>
+        let currentUI = null;
+
+        function loadAPI(specUrl) {
+            // Update active button
+            document.querySelectorAll('.api-selector button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+
+            if (specUrl === 'openapi.yml') {
+                document.getElementById('btn-app').classList.add('active');
+            } else if (specUrl === 'openapi-cms.yml') {
+                document.getElementById('btn-cms').classList.add('active');
+            } else if (specUrl === 'openapi-ai-docs.yml') {
+                document.getElementById('btn-ai').classList.add('active');
+            }
+
+            // Initialize Swagger UI
+            currentUI = SwaggerUIBundle({
+                url: specUrl,
+                dom_id: '#swagger-ui',
+                deepLinking: true,
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIStandalonePreset
+                ],
+                plugins: [
+                    SwaggerUIBundle.plugins.DownloadUrl
+                ],
+                layout: "StandaloneLayout",
+                defaultModelsExpandDepth: 1,
+                defaultModelExpandDepth: 1,
+                docExpansion: "list",
+                filter: true,
+                tryItOutEnabled: true,
+                syntaxHighlight: {
+                    activate: true,
+                    theme: "monokai"
+                }
+            });
+        }
+
+        // Load default API on page load
+        window.onload = function() {
+            loadAPI('openapi.yml');
+        }
+    </script>
+</body>
+</html>
